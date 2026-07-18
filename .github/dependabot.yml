@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # @types/node major versions track the Node.js major. Pin to the
+      # lowest supported runtime (Node 22 per package.json engines) so
+      # types reflect what's actually available on every supported version.
+      # Allow updates within the v22.x line; ignore v23+.
+      - dependency-name: "@types/node"
+        versions: [">=23"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
+
+  # This repo ships a container image, so track the base image too. The
+  # Tailscale binary is pinned by ARG + sha256 in the Dockerfile (not a
+  # Dockerfile FROM), so Dependabot won't see it — the weekly Trivy scan is what
+  # flags a Tailscale CVE; bump TS_VERSION + its sha256 by hand there.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly

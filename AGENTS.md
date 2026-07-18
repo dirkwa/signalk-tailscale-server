@@ -54,6 +54,46 @@ never kernel forwarding. Do not add TUN/cap/sysctl assumptions.
 - Tests mock the `tailscale` CLI (`child_process`), so no daemon is needed.
 - Bump `TS_VERSION` in the Dockerfile **with** its per-arch sha256 together.
 
+## Reconcile / login lifecycle (the core loop)
+
+`reconcile-runner` ticks the reconciler on an adaptive cadence (fast 2s while
+not-Running, slow 15s once Running; a config POST calls `triggerNow()`). Each
+tick reads `tailscale status --json` and branches on `BackendState`:
+
+- **NoState / NeedsLogin** → auto-kick `tailscale up` (async; it blocks until
+  auth). NOT `Stopped` — that's a deliberate post-logout state; re-kicking would
+  fight the user. Logout is the only path that removes the node.
+- **Running** → apply hostname / accept-routes / advertise-routes via
+  `tailscale set` (only when they differ), then `applyServe` (probe candidates →
+  dual `serve --https=443` + `--http=80` → verify → record lastError; reset
+  Funnel if ever seen — SignalK must never be public).
+
+State survives restart/recreate via `--statedir` under DATA_DIR (rides in SK
+backups). `stop()` drains tailscaled but **never** logs out.
+
+## REST contract (port 3020, `{success,data,error,timestamp}` envelope)
+
+`GET /api/health` (supervisor state; HEALTHCHECK + plugin ready-poll) ·
+`GET /api/status` (flattened StatusSnapshot) · `GET|POST /api/config` (desired
+state; persisted, triggers reconcile — config flows here, NOT env, to avoid
+signalk-container drift-recreate churn) · `POST /api/login` (202) ·
+`POST /api/logout` (danger zone: serve reset + logout) · `GET|POST /api/serve` ·
+`GET|POST /api/routes` · `GET /api/events` (SSE snapshots) ·
+`GET /api/docs` + `/api/openapi.json`.
+
+## Build, run, release
+
+- `npm run build:all` — lint + tsc + vitest (63 tests, all mock the CLI).
+- `npm run dev` — `tsx watch`; needs a local `tailscale`/`tailscaled` on PATH to
+  fully exercise, otherwise the reconciler just logs "daemon starting".
+- Container: `podman build -t sk-ts .` then run like signalk-container does —
+  `podman run --userns=keep-id -e DATA_DIR=… -v <host>:/signalk-data:Z -p
+  127.0.0.1:3020:3020 …`. The image HEALTHCHECK is honoured only under Docker
+  (OCI/podman ignores it — harmless; the plugin polls /api/health itself).
+- Release: push a `vX.Y.Z` tag → `publish.yml` builds the amd64+arm64 manifest
+  and pushes `ghcr.io/dirkwa/signalk-tailscale-server:X.Y.Z` (+ `:latest` for
+  stable) and cuts a GitHub Release. Keep the tag == `package.json` version.
+
 ## Gotchas verified on real hardware (rootless podman/pasta)
 
 - `--userns=keep-id` + `HOME=/data` → tailscaled `mkdir /data/.cache: permission
@@ -61,4 +101,9 @@ never kernel forwarding. Do not add TUN/cap/sysctl assumptions.
   child's `HOME` at `DATA_DIR` in supervisor/login spawns.
 - AuthURL appears in `tailscale status --json` ~3s after `up`; the login-kick is
   async because `up` blocks until auth completes (tailscale#3950).
-- `tailscale serve` requires a logged-in Running node (refuses while NeedsLogin).
+- `tailscale serve` requires a logged-in Running node (refuses while NeedsLogin),
+  so R2 (dual serve) / R3 (serve-persist-across-recreate) are doc-verified until
+  a live-tailnet E2E — everything up to NeedsLogin+AuthURL is validated live.
+- `host.containers.internal` (and `host.docker.internal`, which podman also
+  aliases) reach the host SignalK from a pasta bridge container — the basis for
+  the plugin's serve-target candidate ordering.
