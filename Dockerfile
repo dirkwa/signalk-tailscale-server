@@ -24,7 +24,7 @@ ARG VERSION=0.1.0
 # =============================================================================
 # Stage 1: Build backend (TypeScript → ESM)
 # =============================================================================
-FROM node:24-trixie-slim AS backend-builder
+FROM node:26-trixie-slim AS backend-builder
 
 WORKDIR /app
 
@@ -39,7 +39,7 @@ RUN npm exec tsc
 # =============================================================================
 # Stage 2: Production image
 # =============================================================================
-FROM node:24-trixie-slim
+FROM node:26-trixie-slim
 
 # tini — PID-1 signal handling (clean SIGTERM → drain tailscaled).
 # ca-certificates — TLS for the Tailscale control plane + serve certs.
