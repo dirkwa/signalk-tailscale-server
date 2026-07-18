@@ -46,6 +46,11 @@ never kernel forwarding. Do not add TUN/cap/sysctl assumptions.
 - [src/api/](src/api/) — one router per concern, all using the openapi-registry
   `createApiRouter` wrapper (captures OpenAPI metadata + TypeBox validation).
 
+## Workflow
+
+- **Changes go through a pull request** — branch off latest `main`, push, open a
+  PR. Do not push directly to `main` (CI + CodeRabbit run on the PR).
+
 ## Conventions (shared with signalk-backup-server)
 
 - Response envelope everywhere: `{ success, data?, error?, timestamp }`.
