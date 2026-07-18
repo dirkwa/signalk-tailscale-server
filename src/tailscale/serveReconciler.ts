@@ -74,25 +74,33 @@ export async function applyServe(
     serve = {};
   }
 
-  // SAFETY FIRST: Funnel must never expose SignalK publicly.
+  // SAFETY FIRST: Funnel must never expose SignalK publicly. If we can't reset
+  // it, STOP — continuing would leave SignalK reachable from the open internet.
   if (hasFunnel(serve)) {
     logger.error('Funnel detected on serve config — resetting (SignalK must not be public)');
     try {
       await cli.serve(['reset']);
+      serve = {};
     } catch (err) {
       logger.error({ err }, 'failed to reset Funnel serve config');
+      configStore.setServeLastError(
+        'Funnel is enabled and could not be reset; SignalK may be publicly exposed.'
+      );
+      return;
     }
-    serve = {};
   }
 
   if (!desired.enableServe) {
-    // Tear down serve if anything is configured.
+    // Tear down serve if anything is configured. A failed reset must NOT report
+    // success or clear the target — leave lastError set so the state is visible.
     if (Object.keys(serve.TCP ?? {}).length > 0) {
       try {
         await cli.serve(['reset']);
         logger.info('serve disabled by config — reset');
       } catch (err) {
         logger.error({ err }, 'failed to reset serve on disable');
+        configStore.setServeLastError('Failed to disable serve: ' + (err as Error).message);
+        return;
       }
     }
     configStore.setServeTarget(null);
@@ -100,6 +108,10 @@ export async function applyServe(
     return;
   }
 
+  // Capture the configured target BEFORE resolveTarget (which persists the
+  // newly-probed one), so a freshly-discovered target isn't mistaken for one
+  // that's already fully configured below.
+  const previouslyConfiguredTarget = configStore.getServeTarget();
   const target = await resolveTarget(desired);
   if (!target) {
     configStore.setServeLastError(
@@ -109,7 +121,7 @@ export async function applyServe(
   }
 
   // Already fully configured for this target? Nothing to do.
-  if (hasBothListeners(serve) && configStore.getServeTarget() === target) {
+  if (hasBothListeners(serve) && previouslyConfiguredTarget === target) {
     configStore.setServeLastError(null);
     return;
   }

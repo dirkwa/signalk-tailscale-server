@@ -15,7 +15,9 @@ import type { ApiResponse } from '../types/index.js';
 
 const api = createApiRouter('Routes');
 
-const Cidr = Type.String({ pattern: '^\\d{1,3}(\\.\\d{1,3}){3}/\\d{1,2}$' });
+// IPv4 octet 0–255, prefix 0–32 (matches src/schemas/config.ts).
+const OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]?\\d)';
+const Cidr = Type.String({ pattern: `^${OCTET}(?:\\.${OCTET}){3}/(?:[0-9]|[12]\\d|3[0-2])$` });
 
 const routesSchema = Type.Object(
   {
@@ -59,7 +61,17 @@ api.post(
     const patch: { advertiseRoutes?: string[]; acceptRoutes?: boolean } = {};
     if (body.advertiseRoutes !== undefined) patch.advertiseRoutes = body.advertiseRoutes;
     if (body.acceptRoutes !== undefined) patch.acceptRoutes = body.acceptRoutes;
-    const updated = await configStore.update(patch);
+    let updated;
+    try {
+      updated = await configStore.update(patch);
+    } catch (err) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'PERSIST_FAILED', message: (err as Error).message },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
     void reconcileRunner.triggerNow();
     const response: ApiResponse<{ advertiseRoutes: string[]; acceptRoutes: boolean }> = {
       success: true,

@@ -142,16 +142,20 @@ const shutdown = (): void => {
   logger.info('Shutting down...');
   reconcileRunner.stop();
 
-  // Drain tailscaled (SIGTERM → SIGKILL grace), then close HTTP. No logout.
-  void supervisor.stop().finally(() => {
-    server.close(() => {
+  // Arm the force-exit timer FIRST so it covers the entire sequence, including a
+  // hung supervisor.stop(). Stop accepting new connections (server.close), then
+  // drain tailscaled (SIGTERM → SIGKILL grace). No logout.
+  const forceTimer = setTimeout(() => {
+    logger.error('Forced shutdown');
+    process.exit(1);
+  }, 12_000);
+
+  server.close(() => {
+    void supervisor.stop().finally(() => {
+      clearTimeout(forceTimer);
       logger.info('Server closed');
       process.exit(0);
     });
-    setTimeout(() => {
-      logger.error('Forced shutdown');
-      process.exit(1);
-    }, 12_000);
   });
 };
 

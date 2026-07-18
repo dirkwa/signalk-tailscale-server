@@ -44,7 +44,7 @@ export default tseslint.config(
       // never global fetch, to keep the runtime command surface fetch-free.
       'no-restricted-globals': [
         'error',
-        { name: 'fetch', message: 'Use httpFetch from utils/http-client.js instead.' },
+        { name: 'fetch', message: 'Use httpFetch from utils/http-client.ts instead.' },
       ],
     },
   },

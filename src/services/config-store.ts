@@ -56,23 +56,42 @@ class ConfigStore {
     return this.desired;
   }
 
-  /** Merge a partial update, persist atomically, and return the new config. */
+  /**
+   * Merge a partial update, persist atomically, and return the new config.
+   * Rejects (after logging) if the write fails, so the API layer can report the
+   * failure instead of falsely acknowledging a save.
+   */
   async update(patch: Partial<DesiredConfig>): Promise<DesiredConfig> {
     this.desired = { ...this.desired, ...patch };
-    await this.persist();
+    await this.persist(this.desired);
     return this.desired;
   }
 
-  private async persist(): Promise<void> {
-    const path = configFilePath();
-    try {
-      await mkdir(dirname(path), { recursive: true });
-      const tmp = `${path}.tmp`;
-      await writeFile(tmp, JSON.stringify(this.desired, null, 2), 'utf8');
-      await rename(tmp, path);
-    } catch (err) {
-      logger.error({ err, path }, 'Failed to persist config.json');
-    }
+  private writeChain: Promise<void> = Promise.resolve();
+  private writeSeq = 0;
+
+  /**
+   * Serialize concurrent writes onto a single chain (two overlapping POSTs
+   * must not interleave temp-file writes), snapshot the value at call time, and
+   * use a unique temp name per write so a stalled write can't clobber another.
+   * Rethrows on failure.
+   */
+  private persist(snapshot: DesiredConfig): Promise<void> {
+    const run = async (): Promise<void> => {
+      const path = configFilePath();
+      const tmp = `${path}.tmp.${process.pid}.${++this.writeSeq}`;
+      try {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
+        await rename(tmp, path);
+      } catch (err) {
+        logger.error({ err, path }, 'Failed to persist config.json');
+        throw err;
+      }
+    };
+    // Chain after the previous write regardless of its outcome.
+    this.writeChain = this.writeChain.then(run, run);
+    return this.writeChain;
   }
 
   // --- runtime-only serve state (reported in status, not persisted) ---

@@ -26,23 +26,25 @@ const NodeEnv = Type.Union([
 ]);
 
 const configSchema = Type.Object({
-  port: Type.Number({ default: 3020 }),
+  // Strict integer in the valid TCP port range — reject 0, negative, fractional,
+  // and out-of-range values (parseInt truncation is caught here).
+  port: Type.Integer({ default: 3020, minimum: 1, maximum: 65535 }),
 
   /** Root for all persistent state: config.json + tailscale-state/. */
-  dataDir: Type.String(),
+  dataDir: Type.String({ minLength: 1 }),
 
   /** SignalK data dir on host, mounted so we can read config if needed. */
-  signalkDataPath: Type.String(),
+  signalkDataPath: Type.String({ minLength: 1 }),
 
   /** Tailscale statedir (node key + prefs + serve config). Subdir of dataDir, 0700. */
-  tailscaleStateDir: Type.String(),
+  tailscaleStateDir: Type.String({ minLength: 1 }),
 
   /** LocalAPI unix socket tailscaled listens on (container-local). */
-  tailscaledSocket: Type.String({ default: '/tmp/tailscaled.sock' }),
+  tailscaledSocket: Type.String({ default: '/tmp/tailscaled.sock', minLength: 1 }),
 
   /** tailscale / tailscaled binary paths. */
-  tailscaleBinaryPath: Type.String({ default: '/usr/local/bin/tailscale' }),
-  tailscaledBinaryPath: Type.String({ default: '/usr/local/bin/tailscaled' }),
+  tailscaleBinaryPath: Type.String({ default: '/usr/local/bin/tailscale', minLength: 1 }),
+  tailscaledBinaryPath: Type.String({ default: '/usr/local/bin/tailscaled', minLength: 1 }),
 
   /** SignalK server version, set by the plugin via env (informational). */
   signalkVersion: Type.String({ default: 'unknown' }),

@@ -53,9 +53,21 @@ describe('cli.backendState (tolerant)', () => {
     expect(await cli.backendState()).toBe('Running');
   });
 
-  it('returns NoState when the CLI errors (daemon not ready)', async () => {
-    respondWith('', new Error('dial unix /tmp/tailscaled.sock: connect: no such file'));
+  it('returns NoState when the daemon socket is absent (connection error)', async () => {
+    // The socket-connect message must arrive as STDERR — that's what
+    // runTailscale wraps into TailscaleCliError.stderr and backendState matches.
+    execImpl = (_bin, _args, _opts, cb) =>
+      cb(
+        new Error('exit 1'),
+        '',
+        'dial unix /tmp/tailscaled.sock: connect: no such file or directory'
+      );
     expect(await cli.backendState()).toBe('NoState');
+  });
+
+  it('rethrows a non-connection CLI error (real fault, not "not ready")', async () => {
+    execImpl = (_bin, _args, _opts, cb) => cb(new Error('exit 1'), '', 'permission denied');
+    await expect(cli.backendState()).rejects.toThrow(/permission denied/);
   });
 
   it('returns NoState when BackendState is absent', async () => {

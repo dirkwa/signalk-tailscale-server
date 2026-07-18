@@ -23,6 +23,7 @@ class ReconcileRunner {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private stopped = false;
+  private pendingTrigger = false;
   private serveApplier:
     ((desired: DesiredConfig, status: TailscaleStatusJson) => Promise<void>) | undefined;
 
@@ -53,8 +54,17 @@ class ReconcileRunner {
     }
   }
 
-  /** Run one pass now (e.g. after a config change) and reschedule from here. */
+  /**
+   * Run one pass now (e.g. after a config change) and reschedule from here. If a
+   * pass is already running, set pendingTrigger so exactly one follow-up pass
+   * runs after it completes — a config POST that arrives mid-pass must not be
+   * dropped until the next scheduled tick.
+   */
   async triggerNow(): Promise<void> {
+    if (this.running) {
+      this.pendingTrigger = true;
+      return;
+    }
     await this.runPass();
   }
 
@@ -66,18 +76,34 @@ class ReconcileRunner {
 
   private async runPass(): Promise<void> {
     if (this.running || this.stopped) return;
+    // Hold `running` across the pass AND the cadence read + reschedule, so a
+    // triggerNow() arriving mid-pass can't start an overlapping reconcileOnce.
     this.running = true;
+    // A trigger that landed while this pass was starting is about to be served
+    // by this pass, so clear it now; only triggers during the pass re-set it.
+    this.pendingTrigger = false;
     try {
       await reconcileOnce(this.deps());
+      // Choose next cadence by observed state; default fast if the read fails
+      // (e.g. daemon momentarily unavailable) so we retry promptly.
+      let fast = true;
+      try {
+        fast = (await cli.backendState()) !== 'Running';
+      } catch (err) {
+        logger.debug({ err }, 'reconcile: cadence backendState read failed; using fast');
+      }
+      this.schedule(fast ? FAST_MS : SLOW_MS);
     } catch (err) {
       logger.error({ err }, 'reconcile pass threw');
+      this.schedule(FAST_MS);
     } finally {
       this.running = false;
     }
-    // Choose next cadence by observed state. backendState() swallows its own
-    // errors (→ NoState), so the fast path is the natural default.
-    const state = await cli.backendState();
-    this.schedule(state === 'Running' ? SLOW_MS : FAST_MS);
+    // A config change arrived mid-pass — run exactly one immediate follow-up so
+    // it isn't stranded until the next scheduled tick.
+    if (this.pendingTrigger && !this.stopped) {
+      void this.runPass();
+    }
   }
 }
 

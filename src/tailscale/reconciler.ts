@@ -45,7 +45,11 @@ export async function reconcileOnce(deps: ReconcileDeps): Promise<void> {
 
   const state = status.BackendState ?? 'NoState';
 
-  if (state === 'NoState' || state === 'NeedsLogin' || state === 'Stopped') {
+  // NoState (fresh) and NeedsLogin (key present, needs auth) → auto-kick login.
+  // NOT Stopped: a node reaches Stopped after an explicit `tailscale logout` (or
+  // an admin down), and re-kicking would fight the user's intent. Logout is the
+  // only path that removes the node, so leaving Stopped alone is correct.
+  if (state === 'NoState' || state === 'NeedsLogin') {
     if (loginManager.shouldReKick(status.AuthURL ?? null)) {
       loginManager.kick(effectiveHostname(desired));
     }

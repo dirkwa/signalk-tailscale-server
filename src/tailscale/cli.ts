@@ -94,8 +94,18 @@ export async function backendState(): Promise<TailscaleBackendState> {
   try {
     const s = await status();
     return s.BackendState ?? 'NoState';
-  } catch {
-    return 'NoState';
+  } catch (err) {
+    // Only a genuinely-not-ready daemon (socket absent / connection refused)
+    // maps to NoState. Rethrow everything else — a missing binary, permission
+    // error, malformed JSON, or timeout is a real fault the caller shouldn't
+    // silently read as "no state yet".
+    if (
+      err instanceof TailscaleCliError &&
+      /dial unix .*: connect: (no such file|connection refused)/i.test(err.stderr)
+    ) {
+      return 'NoState';
+    }
+    throw err;
   }
 }
 
@@ -126,7 +136,8 @@ export async function logout(): Promise<void> {
 export async function version(): Promise<string | null> {
   try {
     const { stdout } = await runTailscale(['version']);
-    return stdout.split('\n')[0]?.trim() ?? null;
+    // `|| null` (not `??`) so an empty/whitespace-only first line becomes null.
+    return stdout.split('\n')[0]?.trim() || null;
   } catch {
     return null;
   }

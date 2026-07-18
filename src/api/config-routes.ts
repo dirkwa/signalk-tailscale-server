@@ -47,7 +47,18 @@ api.post(
   },
   async (req: Request, res: Response) => {
     const body = req.body as DesiredConfig;
-    const updated = await configStore.update(body);
+    let updated: DesiredConfig;
+    try {
+      updated = await configStore.update(body);
+    } catch (err) {
+      const response: ApiResponse<never> = {
+        success: false,
+        error: { code: 'PERSIST_FAILED', message: (err as Error).message },
+        timestamp: new Date().toISOString(),
+      };
+      res.status(500).json(response);
+      return;
+    }
     // Fire-and-forget the reconcile so the POST returns promptly; errors are
     // logged inside the runner.
     void reconcileRunner.triggerNow();

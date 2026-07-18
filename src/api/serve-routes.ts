@@ -18,9 +18,11 @@ const api = createApiRouter('Serve');
 
 const serveOverrideSchema = Type.Object(
   {
+    // Empty string clears the override (documented reset); otherwise require a
+    // valid http(s) URL.
     target: Type.Optional(
       Type.String({
-        pattern: '^https?://[^\\s]+$',
+        pattern: '^(?:|https?://[^\\s]+)$',
         description: 'Force this serve target; omit/empty to clear the override.',
       })
     ),

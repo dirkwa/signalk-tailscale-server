@@ -37,11 +37,20 @@ api.get(
             schema: {
               type: 'object',
               properties: {
-                status: { type: 'string', examples: ['healthy'] },
-                tailscaled: {
-                  type: 'string',
-                  examples: ['running', 'starting', 'stopped', 'error'],
+                success: { type: 'boolean', examples: [true] },
+                data: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string', examples: ['healthy'] },
+                    tailscaled: {
+                      type: 'string',
+                      examples: ['running', 'starting', 'stopped', 'error'],
+                    },
+                    version: { type: 'string' },
+                    uptime: { type: 'number' },
+                  },
                 },
+                timestamp: { type: 'string', format: 'date-time' },
               },
             },
           },

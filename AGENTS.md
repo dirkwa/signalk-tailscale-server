@@ -22,9 +22,10 @@ never kernel forwarding. Do not add TUN/cap/sysctl assumptions.
 ## File layout
 
 - [src/server.ts](src/server.ts) — Express entrypoint. Mounts route prefixes
-  (`/api/health|status|login|logout|config|events`), loopback-only CORS, boots
-  the supervisor + reconcile loop, Swagger at `/api/docs`. Binds `0.0.0.0`
-  (IPv4 explicit — pasta only bridges IPv4).
+  (`/api/health|status|login|logout|config|serve|routes|events`) plus the
+  OpenAPI surface (`/api/docs` Swagger UI + `/api/openapi.json`), loopback CORS,
+  boots the supervisor + reconcile loop. Binds `0.0.0.0` (IPv4 explicit — pasta
+  only bridges IPv4; host exposure is limited by signalk-container's publishing).
 - [src/config/index.ts](src/config/index.ts) — typebox-validated env config.
   `DATA_DIR` (config.json + tailscale-state/), socket/binary paths, HOST_HOSTNAME.
 - [src/tailscale/](src/tailscale/) — the domain layer:

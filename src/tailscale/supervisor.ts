@@ -27,10 +27,15 @@ const DRAIN_GRACE_MS = 10_000;
 
 export type SupervisorState = 'starting' | 'running' | 'stopped' | 'error';
 
+/** How long tailscaled must stay up before we consider it stable and reset backoff. */
+const STABILITY_MS = 30_000;
+
 class TailscaledSupervisor {
   private child: ChildProcess | null = null;
   private backoffMs = BACKOFF_MIN_MS;
   private restartTimer: NodeJS.Timeout | null = null;
+  private stabilityTimer: NodeJS.Timeout | null = null;
+  private starting = false;
   private shuttingDown = false;
   private state: SupervisorState = 'stopped';
 
@@ -38,15 +43,29 @@ class TailscaledSupervisor {
     return this.state;
   }
 
-  /** Idempotent: ensure the statedir exists (0700) and spawn tailscaled. */
+  /**
+   * Idempotent: ensure the statedir exists (0700) and spawn tailscaled.
+   * Serialized via `starting` so concurrent callers can't double-spawn while
+   * the mkdir await is in flight. If the statedir can't be created, abort —
+   * spawning without a writable statedir would lose the node key.
+   */
   async start(): Promise<void> {
-    if (this.child || this.shuttingDown) return;
+    if (this.child || this.starting || this.shuttingDown) return;
+    this.starting = true;
     try {
       await mkdir(config.tailscaleStateDir, { recursive: true, mode: 0o700 });
     } catch (err) {
+      this.state = 'error';
       logger.error({ err, dir: config.tailscaleStateDir }, 'Failed to create tailscale statedir');
+      this.starting = false;
+      return;
+    }
+    if (this.child || this.shuttingDown) {
+      this.starting = false;
+      return;
     }
     this.spawn();
+    this.starting = false;
   }
 
   private spawn(): void {
@@ -83,29 +102,45 @@ class TailscaledSupervisor {
 
     child.once('spawn', () => {
       this.state = 'running';
-      // Reset backoff once it has stayed up; a flapping daemon keeps escalating.
-      this.backoffMs = BACKOFF_MIN_MS;
       logger.info({ pid: child.pid }, 'tailscaled started');
+      // Reset backoff only after it has STAYED up for STABILITY_MS. Resetting on
+      // 'spawn' alone would defeat exponential backoff for a daemon that starts
+      // then immediately crashes in a loop.
+      this.clearStabilityTimer();
+      this.stabilityTimer = setTimeout(() => {
+        this.backoffMs = BACKOFF_MIN_MS;
+        this.stabilityTimer = null;
+      }, STABILITY_MS);
     });
 
-    child.once('exit', (code, signal) => {
+    // exit and error share one cleanup+restart path so a spawn failure (error
+    // without exit) still schedules a backoff restart instead of wedging.
+    const onGone = (reason: 'exit' | 'error', detail: Record<string, unknown>): void => {
+      if (this.child !== child) return; // stale handler from a replaced child
       this.child = null;
+      this.clearStabilityTimer();
       if (this.shuttingDown) {
         this.state = 'stopped';
-        logger.info({ code, signal }, 'tailscaled exited during shutdown');
+        logger.info({ reason, ...detail }, 'tailscaled gone during shutdown');
         return;
       }
       this.state = 'error';
       logger.warn(
-        { code, signal, backoffMs: this.backoffMs },
-        'tailscaled exited; scheduling restart'
+        { reason, ...detail, backoffMs: this.backoffMs },
+        'tailscaled gone; scheduling restart'
       );
       this.scheduleRestart();
-    });
+    };
 
-    child.once('error', (err) => {
-      logger.error({ err }, 'tailscaled process error');
-    });
+    child.once('exit', (code, signal) => onGone('exit', { code, signal }));
+    child.once('error', (err) => onGone('error', { err }));
+  }
+
+  private clearStabilityTimer(): void {
+    if (this.stabilityTimer) {
+      clearTimeout(this.stabilityTimer);
+      this.stabilityTimer = null;
+    }
   }
 
   private pipeLogs(child: ChildProcess): void {
@@ -147,6 +182,7 @@ class TailscaledSupervisor {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
+    this.clearStabilityTimer();
     const child = this.child;
     if (!child) {
       this.state = 'stopped';

@@ -11,9 +11,14 @@ const CandidateUrl = Type.String({
   description: 'Candidate serve target, e.g. http://host.containers.internal:3000',
 });
 
-/** An RFC1918-ish CIDR to advertise. Loose pattern; the plugin computes these. */
+// IPv4 octet 0–255 and prefix 0–32 — reject shapes like 999.1.1.1/40 at the
+// schema boundary rather than passing them to `tailscale set`.
+const OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]?\\d)';
+const CIDR_PATTERN = `^${OCTET}(?:\\.${OCTET}){3}/(?:[0-9]|[12]\\d|3[0-2])$`;
+
+/** An IPv4 CIDR to advertise (validated octets + prefix). */
 const Cidr = Type.String({
-  pattern: '^\\d{1,3}(\\.\\d{1,3}){3}/\\d{1,2}$',
+  pattern: CIDR_PATTERN,
   description: 'IPv4 CIDR, e.g. 192.168.0.0/24',
 });
 

@@ -80,7 +80,12 @@ class LoginManager {
       // without our kill is a failure the reconciler will notice and re-kick.
       logger.info({ code, signal }, 'tailscale up child exited');
     });
-    child.once('error', (err) => logger.error({ err }, 'tailscale up spawn error'));
+    child.once('error', (err) => {
+      // Guard on identity like the exit handler, so a spawn error on an old
+      // child never clears a newer one.
+      if (this.child === child) this.child = null;
+      logger.error({ err }, 'tailscale up spawn error');
+    });
   }
 
   /**

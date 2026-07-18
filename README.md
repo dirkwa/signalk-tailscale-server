@@ -28,7 +28,13 @@ listeners), configured by the reconciler once the node is logged in.
   node key, so re-enabling reconnects without a new login. Logout is explicit
   (`POST /api/logout`).
 
-## REST API (port 3020, loopback only)
+## REST API (port 3020)
+
+The server binds `0.0.0.0:3020` inside the container; network exposure is
+restricted by how signalk-container publishes the port (loopback-only in the
+managed deployments). The plugin reverse-proxies these routes and gates them as
+admin-only. Every response uses the `{ success, data?, error?, timestamp }`
+envelope — the payloads in the table below are the `data` field.
 
 | Endpoint                                 | Behavior                                                                                                          |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
