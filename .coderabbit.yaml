@@ -1,0 +1,178 @@
+language: en-US
+
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords:
+      - "chore(release):"
+      - "chore(deps):"
+      - "chore(deps-dev):"
+      - "[skip review]"
+      - "WIP"
+    ignore_usernames:
+      - "release-please[bot]"
+      - "renovate[bot]"
+      - "dependabot[bot]"
+      - "github-actions[bot]"
+
+  path_filters:
+    - "!**/package-lock.json"
+    - "!**/yarn.lock"
+    - "!**/pnpm-lock.yaml"
+    - "!**/*.min.js"
+    - "!**/*.min.css"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/node_modules/**"
+
+  high_level_summary_instructions: |
+    Write summaries in present tense. Describe what the code does, not what
+    it did. Skip filler like "This PR" — go straight to the change.
+
+  path_instructions:
+    - path: '**/*'
+      instructions: |
+        ## Scope
+
+        Focus on files changed since `main`. Think about how changes interact
+        with the rest of the codebase, not just the diff in isolation.
+
+        signalk-tailscale-server is a **headless HTTP shim** (no UI) that
+        supervises a userspace-mode `tailscaled` and drives it via the
+        `tailscale` CLI, packaged as a multi-stage `node:24-trixie-slim`
+        container (`ghcr.io/dirkwa/signalk-tailscale-server`). It is launched
+        and managed by the `signalk-tailscale` plugin (a separate repo) via
+        signalk-container's `ensureRunning()`. The plugin owns all UI and
+        reaches this shim through a reverse proxy; nothing here serves a
+        browser.
+
+        ## The one hard constraint (do not violate)
+
+        signalk-container grants no CapAdd / `/dev/net/tun` / sysctls / no
+        privileged. Therefore `tailscaled` runs in **userspace-networking mode**
+        (`--tun=userspace-networking`, gVisor netstack) everywhere. Inbound
+        traffic reaches SignalK only via `tailscale serve`, never kernel
+        forwarding. Do NOT suggest TUN devices, kernel forwarding, sysctls,
+        capabilities, or privileged mode. Subnet routing IS supported in
+        userspace mode (netstack re-dials) — do not suggest removing
+        `advertiseRoutes` / `/api/routes`.
+
+        ## ESM / TypeScript strict / Node 22+
+
+        - `"type": "module"` — relative imports use the `.js` suffix (NodeNext).
+          Do not suggest dropping it.
+        - tsconfig is strict. Avoid `any`.
+        - Node `>= 22.5.0`.
+        - **No global `fetch` in runtime code** — use `httpFetch` from
+          `src/utils/http-client.ts` (Node's classic http module). This is
+          eslint-enforced (`no-restricted-globals`), keeps the runtime command
+          surface fetch-free, and sidesteps any undici regression on the base
+          image. Do not suggest replacing httpFetch with global fetch.
+
+        ## Architecture (the domain layer)
+
+        - **`src/tailscale/cli.ts` is the ONE seam to tailscaled** — an execFile
+          wrapper (`tailscale --socket=…`). Everything that talks to tailscaled
+          goes through it (status/set/serve/logout), so a LocalAPI client could
+          replace it later. Nothing else shells out. Don't scatter child_process
+          calls elsewhere.
+        - **`supervisor.ts`** spawns `tailscaled` with exponential-backoff
+          restart (reset only after a stability interval — a crash-loop must
+          keep backing off), drains on SIGTERM (SIGTERM → SIGKILL grace), and
+          **never logs out**. It sets `HOME=DATA_DIR` for the child because under
+          `--userns=keep-id` only the bind-mounted DATA_DIR is writable
+          (tailscaled's cache would otherwise hit a read-only path).
+        - **`login.ts`** kicks `tailscale up` async (it blocks until auth,
+          tailscale#3950); the AuthURL comes from `status --json` (primary) or a
+          stdout scrape (fallback), with a re-kick heuristic for wedged logins.
+        - **`reconciler.ts`** (via `reconcile-runner`, adaptive cadence) reads
+          `status --json` each tick: auto-kick login on NoState/NeedsLogin (NOT
+          Stopped — that's a deliberate post-logout state); when Running, apply
+          prefs via `tailscale set` and run `applyServe`.
+        - **`serveReconciler.ts`** probes candidates, configures BOTH listeners
+          (`serve --bg --https=443` + `--http=80`), verifies via
+          `serve status --json`, records `lastError` (HTTPS-pending → the webapp
+          shows an "Enable HTTPS" hint), and **resets Funnel if ever detected**
+          (SignalK must never be public). A failed Funnel reset must ABORT, not
+          continue configuring listeners.
+        - **`config-store.ts`** persists desired config atomically (unique temp
+          + rename), serializes writes, returns deep copies, and commits to
+          memory only after the write succeeds.
+
+        ## REST contract (`{success, data, error, timestamp}` envelope)
+
+        - Every response uses the `{success, data?, error?, timestamp}` envelope.
+          Keep it consistent; don't return bare payloads.
+        - Config flows via `POST /api/config` (persisted, triggers reconcile),
+          **NOT container env** — env changes are drift-detected by
+          signalk-container and would recreate (churn) the container. Do not
+          suggest reading config from env at runtime.
+        - The server binds `0.0.0.0` (IPv4 explicit — pasta only bridges IPv4;
+          `::1` hangs). Host exposure is limited by how signalk-container
+          publishes the port, NOT by an in-process bind. Do not describe it as
+          "loopback-only bound".
+        - Routers use the `openapi-registry` `createApiRouter` wrapper (captures
+          OpenAPI metadata + TypeBox validation). New routes should too.
+
+        ## Dockerfile
+
+        - Base is `node:24-trixie-slim` (NOT Wolfi — the arm64 undici SIGILL
+          history). Do not suggest Wolfi/alpine.
+        - The **Tailscale binary is pinned by `TS_VERSION` ARG + per-arch
+          sha256** (amd64/arm64), verified with `sha256sum -c`. Bump the version
+          and BOTH sha256 values together — never one without the other. A CVE
+          against tailscaled (surfaced by the weekly Trivy scan) is the signal to
+          bump; Trivy noise from the static Go binary goes in `.trivyignore`.
+        - npm is stripped from the final image (runtime only runs `node`).
+
+        ## Echo comments
+
+        Flag any comment that merely restates what the code already says.
+        Replace with comments explaining *why*, not *what*. Or delete.
+
+        ## Documentation drift risk
+
+        Flag any `.md` file that contains: specific code snippets / signatures /
+        config values likely to fall out of sync; step-by-step build instructions
+        that shadow the code; or implementation-status / "currently X" wording.
+        (AGENTS.md is the intended exception — the agent-orientation doc.)
+
+        ## Leftover crumbs from intermediate commits
+
+        Flag references in the diff to symbols, files, or approaches that no
+        longer exist on this branch — stale function names in comments, TODOs
+        from a superseded approach, etc.
+
+        ## Unchecked items in test plans
+
+        If the PR description has a checklist with unchecked items, flag it.
+
+        ## Commit / PR conventions
+
+        - Conventional commits (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`,
+          `test:`, `build:`, `ci:`). Imperative mood, <=72 char subject.
+        - PR title becomes the squash commit subject — meaningful one-liner.
+        - **No AI attribution** in commits, PR bodies, or code. Don't mention
+          Claude / AI or add `Co-Authored-By` trailers.
+        - **No version bumps** in feature/fix PRs — only in dedicated
+          `chore(release):` PRs when explicitly asked.
+
+        ## What NOT to flag (intentional)
+
+        - Userspace-networking mode + `tailscale serve` as the only inbound path
+          — mandatory (see the hard constraint).
+        - Subnet routing in userspace mode — supported; not a bug.
+        - Config via `POST /api/config` instead of env — required (drift/churn).
+        - `httpFetch` instead of global `fetch` — required by the lint config.
+        - Binding `0.0.0.0` — required (pasta IPv4); host exposure is at the
+          publish layer.
+        - The single `cli.ts` execFile seam — deliberate indirection for a future
+          LocalAPI client.
+        - `supervisor` not logging out on shutdown — the node key must survive
+          restarts/recreates; logout is explicit-only.
+        - Reset-Funnel-then-abort-on-failure in `serveReconciler` — a safety
+          guard, not dead code.
+        - `as const` literals in discriminated-union construction.
