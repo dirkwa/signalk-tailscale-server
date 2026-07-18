@@ -35,3 +35,10 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      # Pin the Node base image to the 24.x line: it's the runtime the project
+      # test-builds against, and staying on the known-good major avoids
+      # re-opening the Wolfi/arm64 undici SIGILL class of issues. Revisit a major
+      # bump by hand after validating an arm64 image on real hardware.
+      - dependency-name: "node"
+        versions: [">=25"]
