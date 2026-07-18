@@ -1,0 +1,68 @@
+name: Security Scan
+
+# Trivy CVE scan of the container image.
+#
+# Builds the amd64 image from the current Dockerfile and scans three layers:
+#   - npm packages baked into node_modules
+#   - the node:24-trixie-slim base (OS packages)
+#   - the hand-installed Tailscale binary (pinned by TS_VERSION ARG). Expect
+#     Go-binary CVE noise here — a newly-disclosed, FIXED CVE against
+#     tailscale/tailscaled is the signal to bump TS_VERSION (and its pinned
+#     sha256). Persistent unfixable Go-stdlib findings are maintained in
+#     .trivyignore.
+#
+# Runs weekly (not on PRs) so freshly-disclosed CVEs surface even when no code
+# changed, without adding a QEMU build to every PR. Results land in
+# Security → Code scanning. Informational; gates nothing.
+#
+# Tuned to report only ACTIONABLE findings:
+#   - ignore-unfixed: drop CVEs with no fixed version (noise we can't resolve).
+#   - severity HIGH,CRITICAL: skip low/medium OS-package churn.
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security-scan:
+    if: github.repository == 'dirkwa/signalk-tailscale-server'
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image (amd64, no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: signalk-tailscale-server:scan
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'signalk-tailscale-server:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          ignore-unfixed: true
+          severity: 'HIGH,CRITICAL'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-docker'

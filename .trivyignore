@@ -1,0 +1,8 @@
+# CVEs suppressed for the weekly Trivy scan (security-scan.yml).
+#
+# The Tailscale binary is a statically-linked Go program; Trivy attributes
+# Go-stdlib CVEs to it that are already patched in the tailscale/go toolchain
+# but that Trivy can't see the fixed version for. Add specific CVE IDs here with
+# a one-line justification when they prove to be unfixable noise. Keep this list
+# tight — a genuinely fixed CVE against tailscaled is the signal to bump
+# TS_VERSION in the Dockerfile, not to ignore it.
