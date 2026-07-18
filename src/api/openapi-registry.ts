@@ -242,6 +242,7 @@ export function generateOpenApiDocument(): Record<string, unknown> {
     Health: 'Health check endpoints',
     Status: 'Tailscale backend + serve status',
     Login: 'Interactive login lifecycle',
+    Logout: 'Log out (danger zone)',
     Config: 'Desired-state configuration from the plugin',
     Serve: 'tailscale serve inspection / override',
     Routes: 'Subnet-router advertised / accepted routes',

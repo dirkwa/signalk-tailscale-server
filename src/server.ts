@@ -28,9 +28,12 @@ import { statusRouter } from './api/status-routes.js';
 import { loginRouter } from './api/login-routes.js';
 import { logoutRouter } from './api/logout-routes.js';
 import { configRouter } from './api/config-routes.js';
+import { serveRouter } from './api/serve-routes.js';
+import { routesRouter } from './api/routes-routes.js';
 import { eventsRouter } from './api/events-routes.js';
 
 import { supervisor } from './tailscale/supervisor.js';
+import { applyServe } from './tailscale/serveReconciler.js';
 import { configStore } from './services/config-store.js';
 import { reconcileRunner } from './services/reconcile-runner.js';
 
@@ -76,12 +79,17 @@ app.use('/api/status', statusRouter);
 app.use('/api/login', loginRouter);
 app.use('/api/logout', logoutRouter);
 app.use('/api/config', configRouter);
+app.use('/api/serve', serveRouter);
+app.use('/api/routes', routesRouter);
 app.use('/api/events', eventsRouter);
 
 setRoutePrefixByTag('Health', '/api/health');
 setRoutePrefixByTag('Status', '/api/status');
 setRoutePrefixByTag('Login', '/api/login');
+setRoutePrefixByTag('Logout', '/api/logout');
 setRoutePrefixByTag('Config', '/api/config');
+setRoutePrefixByTag('Serve', '/api/serve');
+setRoutePrefixByTag('Routes', '/api/routes');
 setRoutePrefixByTag('Events', '/api/events');
 
 const openApiDocument = generateOpenApiDocument();
@@ -118,9 +126,12 @@ server.listen(config.port, '0.0.0.0', async () => {
     logger.error({ err }, 'Failed to start tailscaled supervisor');
   }
 
+  // Inject the Phase-3 serve applier (probe candidates + configure dual serve).
+  reconcileRunner.setServeApplier(applyServe);
+
   // The reconcile loop auto-kicks login when NoState/NeedsLogin, applies prefs
-  // when Running. Offline-first: it never blocks startup and tolerates a
-  // not-yet-ready daemon.
+  // and serve when Running. Offline-first: it never blocks startup and
+  // tolerates a not-yet-ready daemon.
   reconcileRunner.start();
 });
 

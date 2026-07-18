@@ -16,7 +16,7 @@ import { configStore } from '../services/config-store.js';
 import { logger } from '../services/logger.js';
 import type { ApiResponse } from '../types/index.js';
 
-const api = createApiRouter('Login');
+const api = createApiRouter('Logout');
 
 api.post(
   '/',
