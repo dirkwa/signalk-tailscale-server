@@ -1,6 +1,6 @@
 {
   "name": "signalk-tailscale-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Headless Tailscale engine for the signalk-tailscale plugin: userspace-networking tailscaled + serve, driven by the plugin over a loopback REST shim",
   "main": "dist/server.js",
   "type": "module",
