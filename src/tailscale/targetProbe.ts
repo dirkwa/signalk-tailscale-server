@@ -38,6 +38,9 @@ export async function probeCandidate(candidate: string): Promise<boolean> {
     const res = await httpFetch(url, {
       method: 'GET',
       timeout: PROBE_TIMEOUT_MS,
+      // SignalK's HTTPS listener is typically self-signed — skip cert
+      // verification for the probe (it's a host-local endpoint we proxy anyway).
+      rejectUnauthorized: false,
     });
     if (!res.ok) return false;
     const body = await res.text();
