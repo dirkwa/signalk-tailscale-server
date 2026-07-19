@@ -106,10 +106,14 @@ signalk-container drift-recreate churn) · `POST /api/login` (202) ·
   `--reset` mints a fresh node key + AuthURL every reconcile tick — so the node
   registers in the tailnet but never reaches Running (the URL the user
   authenticates is already stale). `shouldReKick()` therefore keys on session
-  state (`hasKicked`) + whether a status/scraped AuthURL exists, NOT on child
-  liveness: once a URL is pending, do NOT re-kick until STALE_LOGIN_MS. `--reset`
-  is used ONLY on the first kick of a session or an explicit user re-login
-  (`POST /api/login`, post-`logout`) — never on the routine self-heal re-kick.
+  state (`hasKicked`) + elapsed time, NOT on child liveness: WITHIN
+  STALE_LOGIN_MS it never re-kicks (a pending URL is being authenticated; a
+  not-yet-surfaced one just needs time); PAST STALE_LOGIN_MS it re-kicks
+  regardless — even a pending-but-abandoned URL must not pin the node offline
+  forever — but WITHOUT `--reset`, so a genuinely-approved login still lands and
+  the node key is preserved. `--reset` is used ONLY on the first kick of a
+  session or an explicit user re-login (`POST /api/login`, post-`logout`) —
+  never on the routine self-heal re-kick.
   The child exiting is fine; tailscaled holds the pending login and flips to
   Running when the user approves, no child needed to "await" it.
 - `tailscale serve` requires a logged-in Running node (refuses while NeedsLogin),

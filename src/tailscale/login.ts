@@ -105,16 +105,21 @@ class LoginManager {
   /**
    * Should the reconciler kick a login? Given the current status AuthURL:
    *   - Never kicked yet → yes (first kick; caller uses reset=true).
-   *   - A URL exists (status or scraped) → NO, even if the child died: the
-   *     pending login is what the user authenticates; re-kicking would churn it.
-   *   - No URL and it's been >STALE_LOGIN_MS since the last kick → yes (the
-   *     attempt is wedged/expired; self-heal, reset=false).
-   *   - Otherwise → no (give the current attempt time to surface a URL).
+   *   - The attempt has been running > STALE_LOGIN_MS → yes (self-heal,
+   *     reset=false). This applies EVEN IF a URL is pending: an AuthURL the user
+   *     never completes must not pin the node offline forever — after the stale
+   *     window we re-kick for a fresh URL (without --reset, so the node key is
+   *     preserved and a genuinely-approved login still lands).
+   *   - A URL exists (status or scraped) within the stale window → NO, even if
+   *     the child died: that pending login is what the user is authenticating;
+   *     re-kicking now would churn it.
+   *   - No URL yet, within the stale window → NO (give it time to surface one).
    */
-  shouldReKick(statusAuthUrl: string | null): boolean {
+  shouldReKick(_statusAuthUrl: string | null): boolean {
     if (!this.hasKicked) return true;
-    const haveUrl = Boolean(statusAuthUrl || this.scrapedUrl);
-    if (haveUrl) return false;
+    // Within the stale window, never re-kick — a pending URL (status or
+    // scraped) is being authenticated, and a not-yet-surfaced URL just needs
+    // time. Past the window, re-kick regardless (self-heal a wedged attempt).
     return Date.now() - this.startedAt > STALE_LOGIN_MS;
   }
 

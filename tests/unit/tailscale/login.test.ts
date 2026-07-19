@@ -58,8 +58,9 @@ describe('loginManager.shouldReKick', () => {
   });
 
   // The core churn fix: a dead child + a pending status AuthURL must NOT
-  // re-kick — that pending URL is what the user authenticates.
-  it('does NOT re-kick after the child EXITS while a status AuthURL is pending', () => {
+  // re-kick WITHIN the stale window — that pending URL is what the user
+  // authenticates.
+  it('does NOT re-kick after the child EXITS while a status AuthURL is pending (in-window)', () => {
     loginManager.kick('signalk-test');
     const child = spawned[spawned.length - 1]!;
     child.emit('exit', 1, null); // up exits non-zero immediately (the real bug)
@@ -68,16 +69,25 @@ describe('loginManager.shouldReKick', () => {
     expect(loginManager.shouldReKick('https://login.tailscale.com/a/pending')).toBe(false);
   });
 
-  it('re-kicks (without reset) only after STALE_LOGIN_MS with no URL', () => {
+  // A pending AuthURL the user never completes must NOT pin the node offline
+  // forever: after STALE_LOGIN_MS, re-kick for a fresh URL — but without reset.
+  it('DOES re-kick a stale-but-pending status AuthURL past STALE_LOGIN_MS (no reset)', () => {
+    loginManager.kick('signalk-test');
+    expect(loginManager.shouldReKick('https://login.tailscale.com/a/abandoned')).toBe(false);
+    vi.advanceTimersByTime(11 * 60 * 1000);
+    expect(loginManager.shouldReKick('https://login.tailscale.com/a/abandoned')).toBe(true);
+    expect(loginManager.needsReset()).toBe(false);
+  });
+
+  it('re-kicks (without reset) after STALE_LOGIN_MS with no URL', () => {
     loginManager.kick('signalk-test');
     expect(loginManager.shouldReKick(null)).toBe(false);
     vi.advanceTimersByTime(11 * 60 * 1000);
     expect(loginManager.shouldReKick(null)).toBe(true);
-    // A self-heal re-kick must NOT reset (would invalidate a pending login).
     expect(loginManager.needsReset()).toBe(false);
   });
 
-  it('scrapes the AuthURL from up stdout as a fallback and does not re-kick on it', () => {
+  it('scrapes the AuthURL from up stdout as a fallback', () => {
     loginManager.kick('signalk-test');
     const child = spawned[spawned.length - 1]!;
     child.stdout.emit(
@@ -85,7 +95,7 @@ describe('loginManager.shouldReKick', () => {
       Buffer.from('\nTo authenticate, visit:\n\n\thttps://login.tailscale.com/a/deadbeef\n')
     );
     expect(loginManager.getScrapedUrl()).toBe('https://login.tailscale.com/a/deadbeef');
-    vi.advanceTimersByTime(11 * 60 * 1000);
+    // In-window with a scraped URL → don't re-kick.
     expect(loginManager.shouldReKick(null)).toBe(false);
   });
 
