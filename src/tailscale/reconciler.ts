@@ -51,7 +51,10 @@ export async function reconcileOnce(deps: ReconcileDeps): Promise<void> {
   // only path that removes the node, so leaving Stopped alone is correct.
   if (state === 'NoState' || state === 'NeedsLogin') {
     if (loginManager.shouldReKick(status.AuthURL ?? null)) {
-      loginManager.kick(effectiveHostname(desired));
+      // --reset only on the very first kick of a session (fresh node key);
+      // routine self-heal re-kicks must NOT reset, or they'd invalidate a
+      // pending login the user is authenticating.
+      loginManager.kick(effectiveHostname(desired), loginManager.needsReset());
     }
     return;
   }
