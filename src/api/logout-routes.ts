@@ -29,8 +29,10 @@ api.post(
     },
   },
   async (_req: Request, res: Response) => {
-    // Kill any pending login child first so it can't race the logout.
+    // Kill any pending login child first so it can't race the logout, and reset
+    // the login session so the next kick starts fresh (with --reset).
     loginManager.killChild('logout');
+    loginManager.resetSession();
 
     // Best-effort serve reset; a logout should still proceed if serve is absent.
     try {

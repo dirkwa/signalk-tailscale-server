@@ -27,7 +27,8 @@ api.post(
   },
   async (_req: Request, res: Response) => {
     const hostname = effectiveHostname(configStore.get());
-    loginManager.kick(hostname);
+    // Explicit user-initiated (re-)login → force a fresh node key.
+    loginManager.kick(hostname, true);
     const response: ApiResponse<{ hostname: string }> = {
       success: true,
       data: { hostname },

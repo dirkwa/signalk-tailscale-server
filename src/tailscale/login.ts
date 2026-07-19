@@ -4,12 +4,21 @@
  * `tailscale up` blocks until login completes (tailscale/tailscale#3950), so we
  * can't await it — we spawn it detached-ish (tracked child) and read the
  * AuthURL out of `tailscale status --json` (primary; confirmed ~3s in the
- * Phase 0 spike) or scrape it from `up` stdout (fallback). The child stays
- * alive until the user authenticates or we re-kick.
+ * Phase 0 spike) or scrape it from `up` stdout (fallback).
  *
- * Re-kick heuristic: if we've been NeedsLogin for longer than
- * STALE_LOGIN_MS without ever surfacing a URL (or the child died), kill and
- * respawn so a wedged/expired attempt self-heals.
+ * CRITICAL — do not churn a pending login. Once an AuthURL exists, that login
+ * URL is what the user authenticates against; re-kicking (especially with
+ * `--reset`) mints a NEW node key + URL and invalidates the one they're about
+ * to (or just did) approve. Observed on a real box: the `up` child could exit
+ * non-zero immediately, and a naive "child died → re-kick" loop generated a
+ * fresh URL every reconcile tick, so the node registered but never reached
+ * Running. So:
+ *   - Once we have a URL, we DON'T re-kick until STALE_LOGIN_MS, regardless of
+ *     whether the child is still alive. tailscaled keeps the pending login
+ *     server-side; when the user approves it, BackendState flips to Running on
+ *     its own — no child needed to "await" it.
+ *   - `--reset` is used ONLY on the first kick of a fresh session (or an
+ *     explicit re-login), never on the routine self-heal re-kick.
  */
 
 import { spawn, type ChildProcess } from 'child_process';
@@ -25,6 +34,8 @@ class LoginManager {
   private child: ChildProcess | null = null;
   private startedAt = 0;
   private scrapedUrl: string | null = null;
+  /** True after the first kick — subsequent self-heal kicks skip `--reset`. */
+  private hasKicked = false;
 
   /** True while a login child is alive. */
   isRunning(): boolean {
@@ -37,25 +48,26 @@ class LoginManager {
   }
 
   /**
-   * Kick (or re-kick) an interactive login. `--reset` clears any conflicting
-   * prefs from a prior state; `--timeout=0` means `up` waits indefinitely for
-   * auth (we manage lifetime ourselves). Safe to call repeatedly — an existing
-   * child is killed first.
+   * Kick an interactive login. Pass reset=true to force a fresh node key
+   * (`--reset`) — used for the first kick of a session and explicit re-login;
+   * NOT for the routine self-heal re-kick, which must not invalidate a pending
+   * URL. `--timeout=0` means `up` waits indefinitely (we manage lifetime).
    */
-  kick(hostname: string): void {
+  kick(hostname: string, reset = false): void {
     this.killChild('re-kick');
     this.scrapedUrl = null;
     this.startedAt = Date.now();
+    this.hasKicked = true;
 
     const args = [
       `--socket=${config.tailscaledSocket}`,
       'up',
       `--hostname=${hostname}`,
       '--accept-dns=false',
-      '--reset',
+      ...(reset ? ['--reset'] : []),
       '--timeout=0',
     ];
-    logger.info({ hostname }, 'Kicking interactive login (tailscale up)');
+    logger.info({ hostname, reset }, 'Kicking interactive login (tailscale up)');
 
     const child = spawn(config.tailscaleBinaryPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -76,8 +88,10 @@ class LoginManager {
 
     child.once('exit', (code, signal) => {
       if (this.child === child) this.child = null;
-      // Exit 0 = login completed (BackendState will flip to Running). Non-zero
-      // without our kill is a failure the reconciler will notice and re-kick.
+      // The child exiting does NOT mean login failed — tailscaled keeps the
+      // pending login and flips to Running when the user approves the URL.
+      // shouldReKick() deliberately does not treat a dead child as "re-kick
+      // now" while a URL is still pending.
       logger.info({ code, signal }, 'tailscale up child exited');
     });
     child.once('error', (err) => {
@@ -89,16 +103,24 @@ class LoginManager {
   }
 
   /**
-   * Should the reconciler re-kick? True when no child is alive, or the current
-   * attempt has been running past STALE_LOGIN_MS without producing a URL
-   * (neither scraped here nor surfaced in status — the caller passes the
-   * status AuthURL so we don't re-kick a perfectly good pending login).
+   * Should the reconciler kick a login? Given the current status AuthURL:
+   *   - Never kicked yet → yes (first kick; caller uses reset=true).
+   *   - A URL exists (status or scraped) → NO, even if the child died: the
+   *     pending login is what the user authenticates; re-kicking would churn it.
+   *   - No URL and it's been >STALE_LOGIN_MS since the last kick → yes (the
+   *     attempt is wedged/expired; self-heal, reset=false).
+   *   - Otherwise → no (give the current attempt time to surface a URL).
    */
   shouldReKick(statusAuthUrl: string | null): boolean {
-    if (!this.child) return true;
+    if (!this.hasKicked) return true;
     const haveUrl = Boolean(statusAuthUrl || this.scrapedUrl);
     if (haveUrl) return false;
     return Date.now() - this.startedAt > STALE_LOGIN_MS;
+  }
+
+  /** Whether the next kick should pass --reset (only the very first one). */
+  needsReset(): boolean {
+    return !this.hasKicked;
   }
 
   /** Kill the login child (used on re-kick and shutdown). */
@@ -108,6 +130,12 @@ class LoginManager {
       this.child.kill('SIGTERM');
       this.child = null;
     }
+  }
+
+  /** Reset session state so the next kick is treated as a fresh login (--reset). */
+  resetSession(): void {
+    this.hasKicked = false;
+    this.scrapedUrl = null;
   }
 }
 

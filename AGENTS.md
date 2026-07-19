@@ -101,6 +101,17 @@ signalk-container drift-recreate churn) · `POST /api/login` (202) ·
   child's `HOME` at `DATA_DIR` in supervisor/login spawns.
 - AuthURL appears in `tailscale status --json` ~3s after `up`; the login-kick is
   async because `up` blocks until auth completes (tailscale#3950).
+- **Never churn a pending login** (real-deployment bug, fixed): the `up` child
+  can exit non-zero *immediately*, and a "child died → re-kick" loop with
+  `--reset` mints a fresh node key + AuthURL every reconcile tick — so the node
+  registers in the tailnet but never reaches Running (the URL the user
+  authenticates is already stale). `shouldReKick()` therefore keys on session
+  state (`hasKicked`) + whether a status/scraped AuthURL exists, NOT on child
+  liveness: once a URL is pending, do NOT re-kick until STALE_LOGIN_MS. `--reset`
+  is used ONLY on the first kick of a session or an explicit user re-login
+  (`POST /api/login`, post-`logout`) — never on the routine self-heal re-kick.
+  The child exiting is fine; tailscaled holds the pending login and flips to
+  Running when the user approves, no child needed to "await" it.
 - `tailscale serve` requires a logged-in Running node (refuses while NeedsLogin),
   so R2 (dual serve) / R3 (serve-persist-across-recreate) are doc-verified until
   a live-tailnet E2E — everything up to NeedsLogin+AuthURL is validated live.

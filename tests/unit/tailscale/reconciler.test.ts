@@ -9,6 +9,7 @@ vi.mock('../../../src/tailscale/login.js', () => ({
   loginManager: {
     shouldReKick: vi.fn(),
     kick: vi.fn(),
+    needsReset: vi.fn(() => false),
   },
 }));
 
@@ -55,7 +56,7 @@ describe('reconcileOnce — login kick', () => {
 
     await reconcileOnce({ getDesired: () => desired() });
 
-    expect(loginManager.kick).toHaveBeenCalledWith(EXPECTED_DEFAULT_HOST);
+    expect(loginManager.kick).toHaveBeenCalledWith(EXPECTED_DEFAULT_HOST, false);
     expect(cli.set).not.toHaveBeenCalled();
   });
 
