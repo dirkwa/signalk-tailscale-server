@@ -126,16 +126,23 @@ export async function applyServe(
     return;
   }
 
+  // tailscale serve needs `https+insecure://` (not `https://`) to proxy to an
+  // upstream with a self-signed cert — which is what SignalK's HTTPS listener
+  // typically has. http:// targets pass through unchanged.
+  const serveTarget = target.startsWith('https://')
+    ? target.replace(/^https:\/\//, 'https+insecure://')
+    : target;
+
   // Configure both listeners (idempotent — re-running is a no-op in tailscaled).
   try {
-    await cli.serve(['--bg', '--https=443', '--yes', target]);
+    await cli.serve(['--bg', '--https=443', '--yes', serveTarget]);
   } catch (err) {
-    logger.error({ err, target }, 'serve --https=443 failed');
+    logger.error({ err, target: serveTarget }, 'serve --https=443 failed');
   }
   try {
-    await cli.serve(['--bg', '--http=80', '--yes', target]);
+    await cli.serve(['--bg', '--http=80', '--yes', serveTarget]);
   } catch (err) {
-    logger.error({ err, target }, 'serve --http=80 failed');
+    logger.error({ err, target: serveTarget }, 'serve --http=80 failed');
   }
 
   // Verify + record lastError.

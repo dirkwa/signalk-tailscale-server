@@ -86,6 +86,29 @@ describe('applyServe — configure', () => {
     expect(configStore.getServeLastError()).toBeNull();
   });
 
+  it('converts an https target to https+insecure:// for the serve command', async () => {
+    vi.mocked(cli.serveStatus).mockResolvedValueOnce(NONE).mockResolvedValueOnce(BOTH);
+    vi.mocked(findServeTarget).mockResolvedValue('https://host.containers.internal:443');
+    await applyServe(desired(), STATUS_RUNNING);
+
+    const calls = vi.mocked(cli.serve).mock.calls.map((c) => c[0]);
+    // tailscale serve needs https+insecure:// for the self-signed SignalK cert.
+    expect(calls).toContainEqual([
+      '--bg',
+      '--https=443',
+      '--yes',
+      'https+insecure://host.containers.internal:443',
+    ]);
+    expect(calls).toContainEqual([
+      '--bg',
+      '--http=80',
+      '--yes',
+      'https+insecure://host.containers.internal:443',
+    ]);
+    // The stored target keeps the plain https:// form (for probing/reporting).
+    expect(configStore.getServeTarget()).toBe('https://host.containers.internal:443');
+  });
+
   it('records the HTTPS-pending hint when only http comes up', async () => {
     vi.mocked(cli.serveStatus).mockResolvedValueOnce(NONE).mockResolvedValueOnce(HTTP_ONLY);
     vi.mocked(findServeTarget).mockResolvedValue('http://127.0.0.1:3000');

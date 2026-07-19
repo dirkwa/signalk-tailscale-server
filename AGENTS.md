@@ -121,9 +121,17 @@ signalk-container drift-recreate churn) · `POST /api/login` (202) ·
   never on the routine self-heal re-kick.
   The child exiting is fine; tailscaled holds the pending login and flips to
   Running when the user approves, no child needed to "await" it.
-- `tailscale serve` requires a logged-in Running node (refuses while NeedsLogin),
-  so R2 (dual serve) / R3 (serve-persist-across-recreate) are doc-verified until
-  a live-tailnet E2E — everything up to NeedsLogin+AuthURL is validated live.
+- `tailscale serve` requires a logged-in Running node (refuses while NeedsLogin).
+  Login → Running is validated live; dual serve (R2) confirmed against a real
+  tailnet node.
 - `host.containers.internal` (and `host.docker.internal`, which podman also
   aliases) reach the host SignalK from a pasta bridge container — the basis for
   the plugin's serve-target candidate ordering.
+- **HTTPS SignalK upstream** (real-box case): when `ssl:true`, SignalK's HTTP
+  port is a 302→HTTPS *redirect* (no `/signalk` content — probe correctly
+  rejects it), and the real content is on the HTTPS port with a **self-signed**
+  cert. So the probe passes `rejectUnauthorized:false` for https candidates, and
+  `serveReconciler` proxies to an https target as **`https+insecure://host:port`**
+  (tailscale serve's syntax for a self-signed upstream). Verified live: the
+  probe matched `https://host.containers.internal:443` on a box with
+  `{port:80, ssl:true, sslport:443}`.

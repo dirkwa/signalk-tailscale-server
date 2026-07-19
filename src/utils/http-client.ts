@@ -28,6 +28,13 @@ export interface HttpRequestOptions {
   body?: string;
   timeout?: number;
   signal?: AbortSignal;
+  /**
+   * For https targets, skip TLS certificate verification. Used only for the
+   * serve-target probe: SignalK commonly serves HTTPS with a self-signed cert,
+   * and the probe just needs to confirm the SignalK hello — it's a
+   * host-local/loopback endpoint we're about to proxy anyway.
+   */
+  rejectUnauthorized?: boolean;
 }
 
 const DEFAULT_TIMEOUT = 30000;
@@ -42,7 +49,7 @@ export function httpFetch(url: string, options: HttpRequestOptions = {}): Promis
     const isHttps = urlObj.protocol === 'https:';
     const httpModule = isHttps ? https : http;
 
-    const reqOptions: http.RequestOptions = {
+    const reqOptions: https.RequestOptions = {
       hostname: urlObj.hostname,
       port: urlObj.port || (isHttps ? 443 : 80),
       path: urlObj.pathname + urlObj.search,
@@ -53,6 +60,8 @@ export function httpFetch(url: string, options: HttpRequestOptions = {}): Promis
         ...options.headers,
       },
       timeout: options.timeout || DEFAULT_TIMEOUT,
+      // Only meaningful for https; ignored for http.
+      ...(isHttps && options.rejectUnauthorized === false ? { rejectUnauthorized: false } : {}),
     };
 
     // Handle abort signal
