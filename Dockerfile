@@ -86,6 +86,10 @@ RUN npm ci --omit=dev \
 
 COPY --from=backend-builder /app/dist ./dist
 
+# Ship the license terms inside the image: LICENSE.md requires that copies
+# of official releases carry these notices.
+COPY LICENSE.md LICENSE-Apache-2.0-through-v0.x.txt ./
+
 # /data exists as a fallback HOME, but at runtime the supervisor points HOME at
 # DATA_DIR (the writable bind mount) so tailscaled's cache never hits a
 # read-only path under --userns=keep-id (see supervisor.ts).
@@ -112,5 +116,5 @@ ARG VERSION
 LABEL org.opencontainers.image.title="signalk-tailscale-server" \
       org.opencontainers.image.description="Headless userspace-Tailscale engine for the signalk-tailscale plugin" \
       org.opencontainers.image.source="https://github.com/dirkwa/signalk-tailscale-server" \
-      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.licenses="LicenseRef-Source-Available-No-Redistribution" \
       org.opencontainers.image.version="${VERSION}"
